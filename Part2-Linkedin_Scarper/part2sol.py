@@ -1,103 +1,184 @@
-import selenium
-import html
-import smtplib
+import os
 import time
+from datetime import datetime
 from selenium import webdriver
-import openpyxl
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
+from openpyxl import Workbook, load_workbook
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
+
+# Type your username and password
+linkedin_username = "username"
+linkedin_password = "password"
+
+excel_file = "data.xlsx"
+
+driver = webdriver.Edge()
 
 def login_to_linkedin(username, password):
-    """Log in to LinkedIn with the specified username and password."""
-    driver = webdriver.Chrome()
-    driver.get("https://www.linkedin.com/")
-    username_input = driver.find_element_by_id("username")
-    username_input.send_keys(username)
-    password_input = driver.find_element_by_id("password")
-    password_input.send_keys(password)
-    login_button = driver.find_element_by_id("login-submit")
-    login_button.click()
-    return driver
+    driver.get("https://www.linkedin.com/login")
+    time.sleep(2)
 
-def get_unread_messages_and_notifications(driver):
-    """Get the number of unread messages and notifications from the LinkedIn profile."""
-    unread_messages = driver.find_element_by_id("msgCount").text
-    unread_notifications = driver.find_element_by_id("notifCount").text
-    return unread_messages, unread_notifications
+    username_field = driver.find_element(By.ID, "username")
+    username_field.send_keys(username)
+    password_field = driver.find_element(By.ID, "password")
+    password_field.send_keys(password)
+    password_field.send_keys(Keys.RETURN)
 
-def send_email_notification(driver, recipient, unread_messages, unread_notifications):
-    """Send an email notification to the specified recipient with the number of unread messages and notifications."""
-    email_body = html.unescape("""
-    <html>
-    <head>
-    <title>LinkedIn Notification</title>
-    </head>
-    <body>
-    <h1>LinkedIn Notification</h1>
-    <p>You have <b>{{ unread_messages }}</b> unread messages and <b>{{ unread_notifications }}</b> unread notifications.</p>
-    <p>Here is a comparison between the current data and the previous occurrence data:</p>
-    <table>
-    <tr>
-    <th>Data</th>
-    <th>Current</th>
-    <th>Previous</th>
-    </tr>
-    <tr>
-    <td>Unread messages</td>
-    <td>{{ unread_messages }}</td>
-    <td>{{ previous_unread_messages }}</td>
-    </tr>
-    <tr>
-    <td>Unread notifications</td>
-    <td>{{ unread_notifications }}</td>
-    <td>{{ previous_unread_notifications }}</td>
-    </tr>
-    </table>
-    </body>
-    </html>
-    """).format(
-        unread_messages=unread_messages,
-        unread_notifications=unread_notifications,
-        previous_unread_messages=unread_messages,
-        previous_unread_notifications=unread_notifications,
-    )
-    server = smtplib.SMTP("charanbapireddy@gmail.com", 587)
-    server.starttls()
+    try:
+        WebDriverWait(driver, 10).until(EC.url_contains("https://www.linkedin.com/feed/"))
+    except TimeoutException:
+        print("Login failed. Please check your credentials.")
+        driver.quit()
+        exit()
 
-    #give your email address and password
-    server.login("username", "password")
+def get_unread_data():
+    driver.get("https://www.linkedin.com/feed/")
+    driver.implicitly_wait(10)  
+
+    navbar = driver.find_element(By.CSS_SELECTOR, ".global-nav__content")
+    unread_counts = navbar.find_elements(By.CSS_SELECTOR, ".notification-badge__count")
+
+    message_count = int(unread_counts[0].text)
+    notification_count = int(unread_counts[1].text)
+
+    return message_count, notification_count
 
 
-    #give the email address
-    server.sendmail("email", recipient, email_body)
-    server.quit()
+def save_data_to_excel(messages, notifications):
+    if not os.path.exists(excel_file):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.cell(row=1, column=1, value="Date")
+        sheet.cell(row=1, column=2, value="Time")
+        sheet.cell(row=1, column=3, value="Unread Messages")
+        sheet.cell(row=1, column=4, value="Unread Notifications")
+    else:
+        workbook = load_workbook(excel_file)
+        sheet = workbook.active
+
+    last_row = sheet.max_row
+    current_datetime = datetime.now()
+    sheet.cell(row=last_row + 1, column=1, value=current_datetime.date())
+    sheet.cell(row=last_row + 1, column=2, value=current_datetime.time())
+    sheet.cell(row=last_row + 1, column=3, value=messages)
+    sheet.cell(row=last_row + 1, column=4, value=notifications)
+    workbook.save(excel_file)
+
+def send_email_notification(messages, notifications, prev_messages=None, prev_notifications=None):
+    # Email configuration
+    smtp_server = "smtp.gmail.com"
+    smtp_port = 587
+    sender_email = "username"
+    sender_password = "password"
+    recipient_email = "yourmail@gmail.com"
+
+    email_subject = "LinkedIn Unread Notifications"
+
+    email_body = f"""
+        <html>
+        <head>
+            <style>
+            body {{
+                font-family: Arial, sans-serif;
+                background-color: #f5f5f5;
+            }}
+            .card {{
+                padding: 20px;
+                border-radius: 4px;
+                box-shadow: 0px 0px 5px 2px rgba(0, 0, 0, 0.1);
+                background-color: white;
+            }}
+            h1, h2 {{
+                color: #00b300;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            }}
+            table {{
+                border-collapse: collapse;
+                width: 100%;
+            }}
+            th, td {{
+                padding: 8px;
+                text-align: left;
+                border-bottom: 1px solid #ddd;
+            }}
+            th {{
+                font-weight: bold;
+                font-size: 16px;
+            }}
+            td {{
+                font-size: 14px;
+            }}
+            .highlight {{
+                font-weight: bold;
+                color: #00b300;
+            }}
+            </style>
+        </head>
+        <body>
+            <div class="card">
+            <h1>LinkedIn Unread Notifications</h1>
+            <table>
+                <tr>
+                    <th>Date</th>
+                    <th>Time</th>
+                    <th>Unread Messages</th>
+                    <th>Unread Notifications</th>
+                </tr>
+                <tr>
+                    <td>{datetime.now().date()}</td>
+                    <td>{datetime.now().time()}</td>
+                    <td>{messages}</td>
+                    <td>{notifications}</td>
+                </tr>
+            </table>
+            """
+
+    if prev_messages is not None and prev_notifications is not None:
+        email_body += f"""
+            <h2>Comparison with past data:</h2>
+            <p><span class="highlight">Previous Unread Messages :</span> {messages - prev_messages}</p>
+            <p><span class="highlight">Previous Unread Notifications :</span> {notifications - prev_notifications}</p>
+        """
+
+    email_body += """
+            </div>
+        </body>
+        </html>
+    """
+
+    message = MIMEMultipart()
+    message["From"] = sender_email
+    message["To"] = recipient_email
+    message["Subject"] = email_subject
+    message.attach(MIMEText(email_body, "html"))
+
+    try:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.ehlo()
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.send_message(message)
+            print("Email notification sent successfully.")
+    except Exception as e:
+        print(f"Failed to send email notification. Error: {str(e)}")
+
 
 def main():
-    """Main function."""
+    login_to_linkedin(linkedin_username, linkedin_password)
 
-    #Give your email address and password
-    driver = login_to_linkedin("username", "password")
-    unread_messages, unread_notifications = get_unread_messages_and_notifications(driver)
-    send_email_notification(driver, "recipient@gmail.com", unread_messages, unread_notifications)
+    while True:
+        prev_messages, prev_notifications = get_unread_data()
+        time.sleep(3 * 60 * 60)  
+        current_messages, current_notifications = get_unread_data()
+        save_data_to_excel(current_messages, current_notifications)
+        send_email_notification(current_messages, current_notifications, prev_messages, prev_notifications)
 
 if __name__ == "__main__":
     main()
-
-
-# Create a new Excel sheet.
-wb = openpyxl.Workbook()
-
-# Create a header row with the relevant columns.
-sheet = wb.active
-sheet.append(['Timestamp', 'Unread messages', 'Unread notifications'])
-
-# Fill in the columns with the data.
-timestamp = time.time()
-unread_messages = unread_messages
-unread_notifications = unread_notifications
-sheet.append([timestamp, unread_messages, unread_notifications])
-
-# Save the Excel sheet.
-wb.save('notifications.xlsx')
-
-
-
